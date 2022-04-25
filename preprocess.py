@@ -18,6 +18,17 @@ def get_data(data_path, window_size, future_size):
     HAV_df = HAV_df.iloc[300: , :]
     LAV_df = LAV_df.iloc[300: , :]
     
+    
+    cols = []
+    for col in HAP_df.columns:
+        if HAP_df[col].isnull().any() == False and LAP_df[col].isnull().any() == False:
+            cols.append(col)
+    
+    HAP_df = HAP_df[cols]
+    LAP_df = LAP_df[cols]
+    HAV_df = HAV_df[cols]
+    LAV_df = LAV_df[cols]
+    
     dfs = [HAP_df,LAP_df, HAV_df,LAV_df]
     arrays = [df.values for df in dfs]
     data = np.stack(arrays, axis =0)
