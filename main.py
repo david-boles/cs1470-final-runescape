@@ -91,7 +91,48 @@ def get_data(data_path, window_size, future_size, interp_window_ratio=0.9):
         df.drop(columns=to_drop, inplace=True)
         pass
 
-    # TODO: This is probably the point where we want to do any feature engineering...
+    #  Feature engineeering 
+    dfs = [raw_HAP_df,raw_LAP_df, raw_HAV_df,raw_LAV_df]
+    arrays = [df.values for df in dfs]
+    data_matrix = np.stack(arrays, axis =0)
+    bin_size = 10
+    temp_list_roc = []
+    temp_list_roc_bin = []
+    temp_list_ma = []
+    temp_list_EOM = []
+    temp_list_Ulcer = []
+    temp_list_MI = []
+    for i in range(data_matrix.shape[2]):
+        feature_roc = ta.momentum.ROCIndicator(close = pd.Series(data_matrix[0,:,i]), window = 1)
+        generate_roc = feature_roc.roc()
+        temp_list_roc.append(generate_roc)
+
+        feature_roc_bin = ta.momentum.ROCIndicator(close = pd.Series(data_matrix[0,:,i]), window = bin_size)
+        generate_roc_bin = feature_roc_bin.roc()
+        temp_list_roc_bin.append(generate_roc_bin)
+
+        feature_MA = ta.trend.SMAIndicator(close = pd.Series(data_matrix[0,:,i]), window = bin_size)
+        generate_MA = feature_MA.sma_indicator()
+        temp_list_ma.append(generate_MA)
+
+        feature_EOM = ta.volume.EaseOfMovementIndicator(high= pd.Series(data_matrix[0,:,i]), low = pd.Series(data_matrix[1,:,i]), volume=pd.Series(data_matrix[2,:,i]))
+        generate_EOM = feature_EOM.ease_of_movement()
+        temp_list_EOM.append(generate_EOM)
+
+        # feature_Volatility = ta.volatility.UlcerIndex(close = pd.Series(data_matrix[0,:,i]), window = bin_size)
+        # generate_Volatility = feature_Volatility.ulcer_index()
+        # temp_list_Ulcer.append(generate_Volatility)
+
+        feature_MI = ta.trend.mass_index(high= pd.Series(data_matrix[0,:,i]), low = pd.Series(data_matrix[1,:,i]), fillna = True)
+        temp_list_MI.append(feature_MI)
+
+    ROC_df = pd.DataFrame(np.vstack(temp_list_roc).T)
+    ROC_bin_df = pd.DataFrame(np.vstack(temp_list_roc_bin).T)
+    MA_df = pd.DataFrame(np.vstack(temp_list_ma).T)
+    EOM_df = pd.DataFrame(np.vstack(temp_list_EOM).T)
+    # Volatility_df = pd.DataFrame(np.vstack(temp_list_Ulcer).T)
+    MI_df = pd.DataFrame(np.vstack(temp_list_MI).T)
+
 
     # TODO: Split each region into examples. Will's previous code is below
     # but I think we need to think a little bit more about keeping the sets
