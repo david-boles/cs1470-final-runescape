@@ -1,6 +1,6 @@
 import json
 from math import floor
-from turtle import st
+#from turtle import st
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
@@ -91,47 +91,72 @@ def get_data(data_path, window_size, future_size, interp_window_ratio=0.9):
         df.drop(columns=to_drop, inplace=True)
         pass
 
-    #  Feature engineeering 
-    dfs = [raw_HAP_df,raw_LAP_df, raw_HAV_df,raw_LAV_df]
-    arrays = [df.values for df in dfs]
-    data_matrix = np.stack(arrays, axis =0)
-    bin_size = 10
-    temp_list_roc = []
-    temp_list_roc_bin = []
-    temp_list_ma = []
-    temp_list_EOM = []
-    temp_list_Ulcer = []
-    temp_list_MI = []
-    for i in range(data_matrix.shape[2]):
-        feature_roc = ta.momentum.ROCIndicator(close = pd.Series(data_matrix[0,:,i]), window = 1)
-        generate_roc = feature_roc.roc()
-        temp_list_roc.append(generate_roc)
+    # Feature engineeering
+    # Added features - Rate of change, Binned Rate of change, Moving average, 
+    # Ease of movement, Ulcer Volatility (?), Mass Index
 
-        feature_roc_bin = ta.momentum.ROCIndicator(close = pd.Series(data_matrix[0,:,i]), window = bin_size)
-        generate_roc_bin = feature_roc_bin.roc()
-        temp_list_roc_bin.append(generate_roc_bin)
+    period_ROC_dfs = []
+    period_ROC_bin_dfs = []
+    period_MA_dfs = []
+    period_EOM_dfs = []
+    # period_Volatility_dfs = []
+    period_MI_dfs = []
 
-        feature_MA = ta.trend.SMAIndicator(close = pd.Series(data_matrix[0,:,i]), window = bin_size)
-        generate_MA = feature_MA.sma_indicator()
-        temp_list_ma.append(generate_MA)
+    for i in range(len(period_HAP_dfs)):
+        dfs = [period_HAP_dfs[i],period_LAP_dfs[i], period_HAV_dfs[i],period_LAV_dfs[i]]
+        arrays = [df.values for df in dfs]
+        data_matrix = np.stack(arrays, axis =0)
+        bin_size = 10
+        temp_list_roc = []
+        temp_list_roc_bin = []
+        temp_list_ma = []
+        temp_list_EOM = []
+        # temp_list_Ulcer = []
+        temp_list_MI = []
+        for i in range(data_matrix.shape[2]):
 
-        feature_EOM = ta.volume.EaseOfMovementIndicator(high= pd.Series(data_matrix[0,:,i]), low = pd.Series(data_matrix[1,:,i]), volume=pd.Series(data_matrix[2,:,i]))
-        generate_EOM = feature_EOM.ease_of_movement()
-        temp_list_EOM.append(generate_EOM)
+            # Rate of change
+            # First value is always Na because no change from first one
+            feature_roc = ta.momentum.ROCIndicator(close = pd.Series(data_matrix[0,:,i]), window = 1)
+            generate_roc = feature_roc.roc()
+            temp_list_roc.append(generate_roc)
 
-        # feature_Volatility = ta.volatility.UlcerIndex(close = pd.Series(data_matrix[0,:,i]), window = bin_size)
-        # generate_Volatility = feature_Volatility.ulcer_index()
-        # temp_list_Ulcer.append(generate_Volatility)
+            # Binned rate of change
+            # Rate of change calculated over average value over bin_size time stamps
+            # First bin_size values are Na
+            feature_roc_bin = ta.momentum.ROCIndicator(close = pd.Series(data_matrix[0,:,i]), window = bin_size)
+            generate_roc_bin = feature_roc_bin.roc()
+            temp_list_roc_bin.append(generate_roc_bin)
 
-        feature_MI = ta.trend.mass_index(high= pd.Series(data_matrix[0,:,i]), low = pd.Series(data_matrix[1,:,i]), fillna = True)
-        temp_list_MI.append(feature_MI)
+            # Moving Average for bins
+            feature_MA = ta.trend.SMAIndicator(close = pd.Series(data_matrix[0,:,i]), window = bin_size)
+            generate_MA = feature_MA.sma_indicator()
+            temp_list_ma.append(generate_MA)
 
-    ROC_df = pd.DataFrame(np.vstack(temp_list_roc).T)
-    ROC_bin_df = pd.DataFrame(np.vstack(temp_list_roc_bin).T)
-    MA_df = pd.DataFrame(np.vstack(temp_list_ma).T)
-    EOM_df = pd.DataFrame(np.vstack(temp_list_EOM).T)
-    # Volatility_df = pd.DataFrame(np.vstack(temp_list_Ulcer).T)
-    MI_df = pd.DataFrame(np.vstack(temp_list_MI).T)
+            # Ease of movement
+            feature_EOM = ta.volume.EaseOfMovementIndicator(high= pd.Series(data_matrix[0,:,i]), low = pd.Series(data_matrix[1,:,i]), volume=pd.Series(data_matrix[2,:,i]))
+            generate_EOM = feature_EOM.ease_of_movement()
+            temp_list_EOM.append(generate_EOM)
+
+            # Ulcer index for volatility https://school.stockcharts.com/doku.php?id=technical_indicators:ulcer_index
+            # Takes a while to compute, uncomment below to run (need to uncomment temp_list_ulcer, Folatility_df declaration too)
+            # feature_Volatility = ta.volatility.UlcerIndex(close = pd.Series(data_matrix[0,:,i]), window = bin_size)
+            # generate_Volatility = feature_Volatility.ulcer_index()
+            # temp_list_Ulcer.append(generate_Volatility)
+
+            # Mass index, also a volatility indicator tracks change in trend
+            # https://www.investopedia.com/terms/m/mass-index.asp#:~:text=Mass%20index%20is%20a%20form,certain%20point%20and%20then%20contracts.
+            # Quite a bit faster than Ulcer index, but not a great volatility indicator, only useful for finding inflections
+            feature_MI = ta.trend.mass_index(high= pd.Series(data_matrix[0,:,i]), low = pd.Series(data_matrix[1,:,i]), fillna = True)
+            temp_list_MI.append(feature_MI)
+
+        period_ROC_dfs.append(pd.DataFrame(np.vstack(temp_list_roc).T))
+        period_ROC_bin_dfs.append(pd.DataFrame(np.vstack(temp_list_roc_bin).T))
+        period_MA_dfs.append(pd.DataFrame(np.vstack(temp_list_ma).T))
+        period_EOM_dfs.append(pd.DataFrame(np.vstack(temp_list_EOM).T))
+        # period_Volatility_dfs.append(d.DataFrame(np.vstack(temp_list_Ulcer).T))
+        period_MI_dfs.append(pd.DataFrame(np.vstack(temp_list_MI).T))
+
 
 
     # TODO: Split each region into examples. Will's previous code is below
