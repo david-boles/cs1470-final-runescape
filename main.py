@@ -1,19 +1,27 @@
+from itertools import repeat
 import json
-from math import floor
-#from turtle import st
+from math import ceil, floor
+
+# from turtle import st
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import ta
 
 
-def get_data(data_path, window_size, future_size, interp_window_ratio=0.9):
+def get_data(data_path, window_size=24, interp_limit=1, train_set_ratio=0.8):
     """
-    interp_window_ratio defines the maximum region that data is allowed
-    to be interpolated within as a proportion of window_size. For example
-    at 0.5, regions of interpolated data for all items included will not
-    exceed 50% of the window period. Can be null for no limit. Items for
-    which this condition cannot be met are removed.
+    interp_limit defines the maximum region that data is allowed
+    to be interpolated within. Can be 0 for no interpolation or null
+    for no limit. Items for which this condition cannot be met are
+    removed. Should probably be less than the window size.
+
+    Returns a tuple of train_input, train_output, test_input, test_output.
+    Inputs are ndarrays of shape num_examples x window_size x num_items x num_input_metrics.
+    Where the input metrics are the following:
+    High price, low price, high volume, low volume, ...engineered metrics.
+    Outputs are ndarrays of shape num_examples x num_items x num_output_metrics.
+    Where the output metrics are the four non-engineered metrics.
     """
     # Load dataframes for high/low price/volume
     # Columns are timestamp (Unix timestamps/integer seconds) and non-sequential integers
@@ -34,6 +42,8 @@ def get_data(data_path, window_size, future_size, interp_window_ratio=0.9):
     assert all(raw_HAP_df.timestamps == raw_HAV_df.timestamps)
     assert all(raw_HAP_df.timestamps == raw_LAV_df.timestamps)
 
+    print("Loaded raw data")
+
     # Find points at which timestamps skip (probably due to server restarts),
     # and split the dataframes into contiguous periods.
     # This should be done first since other operations assume contiguous data.
@@ -47,13 +57,20 @@ def get_data(data_path, window_size, future_size, interp_window_ratio=0.9):
     period_HAV_dfs = []
     period_LAV_dfs = []
     for (start, end) in indices:
+        # Also remove the timestamps as they're no longer needed.
         # Copies shouldn't be strictly necessary (esp. given regions
         # are non-overlapping) but they make Pandas happier when we
         # operate inplace later on.
-        period_HAP_dfs.append(raw_HAP_df.iloc[start:end, :].copy()),
-        period_LAP_dfs.append(raw_LAP_df.iloc[start:end, :].copy()),
-        period_HAV_dfs.append(raw_HAV_df.iloc[start:end, :].copy()),
-        period_LAV_dfs.append(raw_LAV_df.iloc[start:end, :].copy()),
+        period_HAP_dfs.append(raw_HAP_df.iloc[start:end, 1:].copy()),
+        period_LAP_dfs.append(raw_LAP_df.iloc[start:end, 1:].copy()),
+        period_HAV_dfs.append(raw_HAV_df.iloc[start:end, 1:].copy()),
+        period_LAV_dfs.append(raw_LAV_df.iloc[start:end, 1:].copy()),
+
+    num_periods = len(period_HAP_dfs)
+    period_lengths = [df.shape[0] for df in period_HAP_dfs]
+    item_index = period_HAP_dfs[0].columns
+
+    print("Separated into contiguous regions")
 
     # If an item isn't traded, both the volume and prices will be NaN.
     # Fill these with the correct and interpolated values respectively.
@@ -64,37 +81,35 @@ def get_data(data_path, window_size, future_size, interp_window_ratio=0.9):
     for V_df in [*period_HAV_dfs, *period_LAV_dfs]:
         V_df.fillna(0, inplace=True)
 
-    limit = None
-    if interp_window_ratio is not None:
-        # Round down: choosing a lower limit is safer than a higher one
-        limit = floor(window_size * interp_window_ratio)
-
-    col_has_nan_after_interp_s = pd.Series(False, index=raw_HAP_df.columns)
-    for P_df in [*period_HAP_dfs, *period_LAP_dfs]:
-        if limit > 0:
+    col_has_nan_after_interp_s = pd.Series(False, index=item_index)
+    for ind, P_df in enumerate([*period_HAP_dfs, *period_LAP_dfs]):
+        if interp_limit > 0:
             P_df.interpolate(
                 method="linear",
                 limit_direction="both",
-                limit=limit,
+                limit=interp_limit,
                 inplace=True,
             )
+        print(f"Interpolated {ind+1} dataframes")
 
         col_has_nan_after_interp_s |= P_df.isna().sum() > 0
 
-    # Make sure we're left with at least some valid items, besides timestamps
-    assert col_has_nan_after_interp_s.sum() + 1 < len(raw_HAP_df.columns)
+    # Make sure we're left with at least some valid items
+    assert col_has_nan_after_interp_s.sum() < len(item_index)
 
     to_drop = [
         col for col, has_nan in col_has_nan_after_interp_s.iteritems() if has_nan
     ]
     for df in [*period_HAP_dfs, *period_LAP_dfs, *period_HAV_dfs, *period_LAV_dfs]:
         df.drop(columns=to_drop, inplace=True)
-        pass
+
+    item_index = period_HAP_dfs[0].columns
+
+    print("Finished 0 volume processing")
 
     # Feature engineeering
-    # Added features - Rate of change, Binned Rate of change, Moving average, 
+    # Added features - Rate of change, Binned Rate of change, Moving average,
     # Ease of movement, Ulcer Volatility (?), Mass Index
-
     period_ROC_dfs = []
     period_ROC_bin_dfs = []
     period_MA_dfs = []
@@ -102,10 +117,16 @@ def get_data(data_path, window_size, future_size, interp_window_ratio=0.9):
     # period_Volatility_dfs = []
     period_MI_dfs = []
 
-    for i in range(len(period_HAP_dfs)):
-        dfs = [period_HAP_dfs[i],period_LAP_dfs[i], period_HAV_dfs[i],period_LAV_dfs[i]]
+    for per_ind in range(num_periods):
+        dfs = [
+            period_HAP_dfs[per_ind],
+            period_LAP_dfs[per_ind],
+            period_HAV_dfs[per_ind],
+            period_LAV_dfs[per_ind],
+        ]
         arrays = [df.values for df in dfs]
-        data_matrix = np.stack(arrays, axis =0)
+        data_matrix = np.stack(arrays, axis=0)
+        # TODO, do we want this hard-coded? how does it relate to window size?
         bin_size = 10
         temp_list_roc = []
         temp_list_roc_bin = []
@@ -113,28 +134,38 @@ def get_data(data_path, window_size, future_size, interp_window_ratio=0.9):
         temp_list_EOM = []
         # temp_list_Ulcer = []
         temp_list_MI = []
-        for i in range(data_matrix.shape[2]):
-
+        for item_ind in range(data_matrix.shape[2]):
+            # TODO do any of these leak information back in time?
             # Rate of change
             # First value is always Na because no change from first one
-            feature_roc = ta.momentum.ROCIndicator(close = pd.Series(data_matrix[0,:,i]), window = 1)
+            feature_roc = ta.momentum.ROCIndicator(
+                close=pd.Series(data_matrix[0, :, item_ind]), window=1
+            )
             generate_roc = feature_roc.roc()
             temp_list_roc.append(generate_roc)
 
             # Binned rate of change
             # Rate of change calculated over average value over bin_size time stamps
-            # First bin_size values are Na
-            feature_roc_bin = ta.momentum.ROCIndicator(close = pd.Series(data_matrix[0,:,i]), window = bin_size)
+            # First bin_size values are Na # TODO problem?
+            feature_roc_bin = ta.momentum.ROCIndicator(
+                close=pd.Series(data_matrix[0, :, item_ind]), window=bin_size
+            )
             generate_roc_bin = feature_roc_bin.roc()
             temp_list_roc_bin.append(generate_roc_bin)
 
             # Moving Average for bins
-            feature_MA = ta.trend.SMAIndicator(close = pd.Series(data_matrix[0,:,i]), window = bin_size)
+            feature_MA = ta.trend.SMAIndicator(
+                close=pd.Series(data_matrix[0, :, item_ind]), window=bin_size
+            )
             generate_MA = feature_MA.sma_indicator()
             temp_list_ma.append(generate_MA)
 
             # Ease of movement
-            feature_EOM = ta.volume.EaseOfMovementIndicator(high= pd.Series(data_matrix[0,:,i]), low = pd.Series(data_matrix[1,:,i]), volume=pd.Series(data_matrix[2,:,i]))
+            feature_EOM = ta.volume.EaseOfMovementIndicator(
+                high=pd.Series(data_matrix[0, :, item_ind]),
+                low=pd.Series(data_matrix[1, :, item_ind]),
+                volume=pd.Series(data_matrix[2, :, item_ind]),
+            )
             generate_EOM = feature_EOM.ease_of_movement()
             temp_list_EOM.append(generate_EOM)
 
@@ -147,34 +178,107 @@ def get_data(data_path, window_size, future_size, interp_window_ratio=0.9):
             # Mass index, also a volatility indicator tracks change in trend
             # https://www.investopedia.com/terms/m/mass-index.asp#:~:text=Mass%20index%20is%20a%20form,certain%20point%20and%20then%20contracts.
             # Quite a bit faster than Ulcer index, but not a great volatility indicator, only useful for finding inflections
-            feature_MI = ta.trend.mass_index(high= pd.Series(data_matrix[0,:,i]), low = pd.Series(data_matrix[1,:,i]), fillna = True)
+            feature_MI = ta.trend.mass_index(
+                high=pd.Series(data_matrix[0, :, item_ind]),
+                low=pd.Series(data_matrix[1, :, item_ind]),
+                fillna=True,
+            )
             temp_list_MI.append(feature_MI)
 
-        period_ROC_dfs.append(pd.DataFrame(np.vstack(temp_list_roc).T))
-        period_ROC_bin_dfs.append(pd.DataFrame(np.vstack(temp_list_roc_bin).T))
-        period_MA_dfs.append(pd.DataFrame(np.vstack(temp_list_ma).T))
-        period_EOM_dfs.append(pd.DataFrame(np.vstack(temp_list_EOM).T))
-        # period_Volatility_dfs.append(d.DataFrame(np.vstack(temp_list_Ulcer).T))
-        period_MI_dfs.append(pd.DataFrame(np.vstack(temp_list_MI).T))
+        period_ROC_dfs.append(
+            pd.DataFrame(
+                np.vstack(temp_list_roc).T,
+                columns=item_index,
+            )
+        )
+        period_ROC_bin_dfs.append(
+            pd.DataFrame(
+                np.vstack(temp_list_roc_bin).T,
+                columns=item_index,
+            )
+        )
+        period_MA_dfs.append(
+            pd.DataFrame(
+                np.vstack(temp_list_ma).T,
+                columns=item_index,
+            )
+        )
+        period_EOM_dfs.append(
+            pd.DataFrame(
+                np.vstack(temp_list_EOM).T,
+                columns=item_index,
+            )
+        )
+        # period_Volatility_dfs.append(
+        #     d.DataFrame(
+        #         np.vstack(temp_list_Ulcer).T,
+        #         columns=item_index,
+        #     )
+        # )
+        period_MI_dfs.append(
+            pd.DataFrame(
+                np.vstack(temp_list_MI).T,
+                columns=item_index,
+            )
+        )
+
+        print(f"Finished feature engineering for period {per_ind+1}")
+
+    # Split each region into examples. Windows overlap (stride of 1) but test data is only
+    # taken from the end of each period so that its output values have never
+    # been trained on by the network.
+    train_window_inds = []
+    test_window_inds = []
+    for item_ind, length in enumerate(period_lengths):
+        window_inds = list(
+            zip(
+                repeat(item_ind),
+                range(0, (length - window_size)),
+                range(window_size, length),
+            )
+        )
+        start_test_windows = floor(len(window_inds) * train_set_ratio)
+        train_window_inds += window_inds[:start_test_windows]
+        test_window_inds += window_inds[start_test_windows:]
+
+    train_input = np.zeros((len(train_window_inds), window_size, len(item_index), 9))
+    train_output = np.zeros((len(train_window_inds), len(item_index), 4))
+    test_input = np.zeros((len(test_window_inds), window_size, len(item_index), 9))
+    test_output = np.zeros((len(test_window_inds), len(item_index), 4))
+    for window_inds, input, output in [
+        [train_window_inds, train_input, train_output],
+        [test_window_inds, test_input, test_output],
+    ]:
+        for example_ind, (period_ind, window_start_ind, window_end_ind) in enumerate(
+            window_inds
+        ):
+            for feature_ind, (feature_in_output, period_dfs) in enumerate(
+                [
+                    [True, period_HAP_dfs],
+                    [True, period_LAP_dfs],
+                    [True, period_HAV_dfs],
+                    [True, period_LAV_dfs],
+                    [False, period_ROC_dfs],
+                    [False, period_ROC_bin_dfs],
+                    [False, period_MA_dfs],
+                    [False, period_EOM_dfs],
+                    [False, period_MI_dfs],
+                ]
+            ):
+                input[example_ind, :, :, feature_ind] = period_dfs[period_ind].iloc[
+                    window_start_ind:window_end_ind, :
+                ]
+                if feature_in_output:
+                    output[example_ind, :, feature_ind] = period_dfs[period_ind].iloc[
+                        window_end_ind, :
+                    ]
+
+    print("Done preprocessing data")
+
+    return train_input, train_output, test_input, test_output
 
 
+# TODO NaNs in engineered features
 
-    # TODO: Split each region into examples. Will's previous code is below
-    # but I think we need to think a little bit more about keeping the sets
-    # distinct and representative if also want overlapping windows.
-
-    # observations = []
-    # values = []
-    # for i in range(window_size, len(raw_HAP_df) - future_size):
-    #     X_indices = list(range(i - window_size, i))
-    #     y_indices = list(range(i, i + future_size))
-    #     observations.append(data[:, X_indices, :])
-    #     values.append(data[:, y_indices, :])
-
-    # X = np.stack(observations, axis=0)
-    # y = np.stack(values, axis=0)
-    # # X_shape = observation, metrics, time, item
-    # return X, y
-
-
-get_data("./data", 10, 1)
+train_input, train_output, test_input, test_output = get_data("./data", 10, 1)
+pass
