@@ -1,14 +1,16 @@
 from itertools import repeat
 import json
 from math import ceil, floor
-
+from sklearn.metrics import mean_squared_error as MSE
 # from turtle import st
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import ta
-
-
+import tensorflow_addons as tfa
+from tensorflow.keras.models  import Sequential
+from tensorflow.keras.layers import LSTM, Dropout,Dense
+import tensorflow as tf
 def get_data(data_path, window_size=24, interp_limit=1, train_set_ratio=0.8):
     """
     interp_limit defines the maximum region that data is allowed
@@ -281,4 +283,27 @@ def get_data(data_path, window_size=24, interp_limit=1, train_set_ratio=0.8):
 # TODO NaNs in engineered features
 
 train_input, train_output, test_input, test_output = get_data("./data", 10, 1)
+
+print(train_output.shape)
+
+units = 1000
+con = .3
+leaky = .75
+sr = .7
+dense1 = 200
+lr = .002
+
+
+model = Sequential()
+model.add(tfa.layers.ESN(units, connectivity = con, leaky = leaky, spectral_radius = sr, activation = 'tanh'))#, return_sequences = True ))
+model.add(tf.keras.layers.Dense(dense1, activation="relu"))
+model.add(tf.keras.layers.Dense(1000))
+model.add(tf.keras.layers.Dense(500))
+#model.add(Dropout(0.2))
+model.add(tf.keras.layers.Dense(6919*4*836))
+model.add(tf.keras.layers.Reshape((6919,836,4)))
+opt = tf.keras.optimizers.Adam(learning_rate=lr)
+model.compile(optimizer=opt,loss='mean_squared_error')
+history = model.fit(train_input,train_output,epochs=20,batch_size=24)
+
 pass
