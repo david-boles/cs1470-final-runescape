@@ -1,17 +1,20 @@
 from itertools import repeat
 import json
 from math import ceil, floor
+import os
 from sklearn.metrics import mean_squared_error as MSE
-# from turtle import st
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import ta
 import tensorflow_addons as tfa
-from tensorflow.keras.models  import Sequential
-from tensorflow.keras.layers import LSTM, Dropout,Dense
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dropout, Dense
+import pickle
 import tensorflow as tf
-def get_data(data_path, window_size=24, interp_limit=1, train_set_ratio=0.8):
+
+
+def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
     """
     interp_limit defines the maximum region that data is allowed
     to be interpolated within. Can be 0 for no interpolation or null
@@ -25,17 +28,28 @@ def get_data(data_path, window_size=24, interp_limit=1, train_set_ratio=0.8):
     Outputs are ndarrays of shape num_examples x num_items x num_output_metrics.
     Where the output metrics are the four non-engineered metrics.
     """
+    # Cache folder is gitignored and file name is versioned and labeled
+    # in an attempt to prevent stale caches (and because the picke is gibibytes in size :D ).
+    # IF GET_DATA OR SOURCE PARQUET FILES ARE MODIFIED, BUMP THE VERSION NUMBER BELOW
+    cache_path = f"./data/cache/preprocessed-v1-{window_size}-{interp_limit}-{train_set_ratio}.pickle"
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+
+    # Attempt to load cached pre-processed data first.
+    try:
+        with open(cache_path, "rb") as f:
+            data = pickle.load(f)
+            print(f"Found cache of preprocessed data at {cache_path}")
+            return data
+    except:
+        print("Unable to find cache of preprocessed data")
+
     # Load dataframes for high/low price/volume
     # Columns are timestamp (Unix timestamps/integer seconds) and non-sequential integers
     # that can be corresponded to item names using the jsons in `data/name_dicts`.
-    raw_HAP_df = pd.read_parquet(f"{data_path}/pricing_data/avgHighPrice.parquet.gzip")
-    raw_LAP_df = pd.read_parquet(f"{data_path}/pricing_data/avgLowPrice.parquet.gzip")
-    raw_HAV_df = pd.read_parquet(
-        f"{data_path}/pricing_data/highPriceVolume.parquet.gzip"
-    )
-    raw_LAV_df = pd.read_parquet(
-        f"{data_path}/pricing_data/lowPriceVolume.parquet.gzip"
-    )
+    raw_HAP_df = pd.read_parquet("./data/pricing_data/avgHighPrice.parquet.gzip")
+    raw_LAP_df = pd.read_parquet("./data/pricing_data/avgLowPrice.parquet.gzip")
+    raw_HAV_df = pd.read_parquet("./data/pricing_data/highPriceVolume.parquet.gzip")
+    raw_LAV_df = pd.read_parquet("./data/pricing_data/lowPriceVolume.parquet.gzip")
 
     assert all(raw_HAP_df.columns == raw_LAP_df.columns)
     assert all(raw_HAP_df.columns == raw_HAV_df.columns)
@@ -128,7 +142,8 @@ def get_data(data_path, window_size=24, interp_limit=1, train_set_ratio=0.8):
         ]
         arrays = [df.values for df in dfs]
         data_matrix = np.stack(arrays, axis=0)
-        # TODO, do we want this hard-coded? how does it relate to window size?
+        # 1<Bin_size<window_size, otherwise weird things happen
+        # Could set to something like floor(period_lengths/10) or something
         bin_size = 10
         temp_list_roc = []
         temp_list_roc_bin = []
@@ -137,11 +152,10 @@ def get_data(data_path, window_size=24, interp_limit=1, train_set_ratio=0.8):
         # temp_list_Ulcer = []
         temp_list_MI = []
         for item_ind in range(data_matrix.shape[2]):
-            # TODO do any of these leak information back in time?
             # Rate of change
             # First value is always Na because no change from first one
             feature_roc = ta.momentum.ROCIndicator(
-                close=pd.Series(data_matrix[0, :, item_ind]), window=1
+                close=pd.Series(data_matrix[0, :, item_ind]), window=1, fillna=True
             )
             generate_roc = feature_roc.roc()
             temp_list_roc.append(generate_roc)
@@ -150,14 +164,18 @@ def get_data(data_path, window_size=24, interp_limit=1, train_set_ratio=0.8):
             # Rate of change calculated over average value over bin_size time stamps
             # First bin_size values are Na # TODO problem?
             feature_roc_bin = ta.momentum.ROCIndicator(
-                close=pd.Series(data_matrix[0, :, item_ind]), window=bin_size
+                close=pd.Series(data_matrix[0, :, item_ind]),
+                window=bin_size,
+                fillna=True,
             )
             generate_roc_bin = feature_roc_bin.roc()
             temp_list_roc_bin.append(generate_roc_bin)
 
             # Moving Average for bins
             feature_MA = ta.trend.SMAIndicator(
-                close=pd.Series(data_matrix[0, :, item_ind]), window=bin_size
+                close=pd.Series(data_matrix[0, :, item_ind]),
+                window=bin_size,
+                fillna=True,
             )
             generate_MA = feature_MA.sma_indicator()
             temp_list_ma.append(generate_MA)
@@ -167,6 +185,7 @@ def get_data(data_path, window_size=24, interp_limit=1, train_set_ratio=0.8):
                 high=pd.Series(data_matrix[0, :, item_ind]),
                 low=pd.Series(data_matrix[1, :, item_ind]),
                 volume=pd.Series(data_matrix[2, :, item_ind]),
+                fillna=True,
             )
             generate_EOM = feature_EOM.ease_of_movement()
             temp_list_EOM.append(generate_EOM)
@@ -277,33 +296,80 @@ def get_data(data_path, window_size=24, interp_limit=1, train_set_ratio=0.8):
 
     print("Done preprocessing data")
 
-    return train_input, train_output, test_input, test_output
+    data = (train_input, train_output, test_input, test_output)
+
+    with open(cache_path, "wb") as f:
+        pickle.dump(data, f, pickle.HIGHEST_PROTOCOL)
+
+    print(f"Cached preprocessed data at {cache_path}")
+
+    return data
 
 
-# TODO NaNs in engineered features
+def mean_squared_proportional_error(y_true, y_pred):
+    # Both volume and prices are non-negative scalars
+    # We want a small error relative to whatever true price or
+    # volume the item actually has.
+    # Since the true values can be 0, we add 1 so it doesn't divide by 0.
+    return tf.reduce_mean(((y_true - y_pred) / (y_true + 1)) ** 2)
 
-train_input, train_output, test_input, test_output = get_data("./data", 10, 1)
 
-print(train_output.shape)
+def mean_abs_proportional_error(y_true, y_pred):
+    return tf.reduce_mean(tf.abs((y_true - y_pred) / (y_true + 1)))
 
-units = 1000
-con = .3
-leaky = .75
-sr = .7
+
+train_input, train_output, test_input, test_output = get_data()
+
+num_items = train_input.shape[2]
+num_output_features = train_output.shape[2]
+
+
+# Optionally limit # items and, indirectly, network complexity for testing
+num_items = 100
+train_input = train_input[:, :, :num_items, :]
+train_output = train_output[:, :num_items, :]
+test_input = test_input[:, :, :num_items, :]
+test_output = test_output[:, :num_items, :]
+
+print(num_items)
+
+train_input = train_input.reshape((*train_input.shape[:2], -1))
+test_input = test_input.reshape((*test_input.shape[:2], -1))
+
+
+units = num_items * 10  # arbitrary :shrug:
+con = 0.3
+leaky = 0.75
+sr = 0.7
 dense1 = 200
-lr = .002
+lr = 0.001
 
 
 model = Sequential()
-model.add(tfa.layers.ESN(units, connectivity = con, leaky = leaky, spectral_radius = sr, activation = 'tanh'))#, return_sequences = True ))
+model.add(
+    tfa.layers.ESN(
+        units, connectivity=con, leaky=leaky, spectral_radius=sr, activation="tanh"
+    )
+)  # , return_sequences = True ))
 model.add(tf.keras.layers.Dense(dense1, activation="relu"))
-model.add(tf.keras.layers.Dense(1000))
-model.add(tf.keras.layers.Dense(500))
-#model.add(Dropout(0.2))
-model.add(tf.keras.layers.Dense(6919*4*836))
-model.add(tf.keras.layers.Reshape((6919,836,4)))
+model.add(tf.keras.layers.Dense(num_items * 10))
+model.add(tf.keras.layers.Dense(num_items * 10))
+# model.add(Dropout(0.2))
+model.add(tf.keras.layers.Dense(num_items * num_output_features))
+model.add(tf.keras.layers.Reshape((num_items, num_output_features)))
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
-model.compile(optimizer=opt,loss='mean_squared_error')
-history = model.fit(train_input,train_output,epochs=20,batch_size=24)
+model.compile(
+    optimizer=opt,
+    # loss="mean_squared_error",
+    loss=mean_squared_proportional_error,
+    metrics=[mean_abs_proportional_error],
+)
+history = model.fit(
+    train_input,
+    train_output,
+    epochs=20,
+    batch_size=24,
+    validation_data=(test_input, test_output),
+)
 
 pass
