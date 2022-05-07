@@ -306,17 +306,43 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
     return data
 
 
+def mean_squared_proportional_error(y_true, y_pred):
+    # Both volume and prices are non-negative scalars
+    # We want a small error relative to whatever true price or
+    # volume the item actually has.
+    # Since the true values can be 0, we add 1 so it doesn't divide by 0.
+    return tf.reduce_mean(((y_true - y_pred) / (y_true + 1)) ** 2)
+
+
+def mean_abs_proportional_error(y_true, y_pred):
+    return tf.reduce_mean(tf.abs((y_true - y_pred) / (y_true + 1)))
+
+
 train_input, train_output, test_input, test_output = get_data()
 
+num_items = train_input.shape[2]
+num_output_features = train_output.shape[2]
 
-print(train_output.shape)
 
-units = 1000
+# Optionally limit # items and, indirectly, network complexity for testing
+num_items = 100
+train_input = train_input[:, :, :num_items, :]
+train_output = train_output[:, :num_items, :]
+test_input = test_input[:, :, :num_items, :]
+test_output = test_output[:, :num_items, :]
+
+print(num_items)
+
+train_input = train_input.reshape((*train_input.shape[:2], -1))
+test_input = test_input.reshape((*test_input.shape[:2], -1))
+
+
+units = num_items * 10  # arbitrary :shrug:
 con = 0.3
 leaky = 0.75
 sr = 0.7
 dense1 = 200
-lr = 0.002
+lr = 0.001
 
 
 model = Sequential()
@@ -326,13 +352,24 @@ model.add(
     )
 )  # , return_sequences = True ))
 model.add(tf.keras.layers.Dense(dense1, activation="relu"))
-model.add(tf.keras.layers.Dense(1000))
-model.add(tf.keras.layers.Dense(500))
+model.add(tf.keras.layers.Dense(num_items * 10))
+model.add(tf.keras.layers.Dense(num_items * 10))
 # model.add(Dropout(0.2))
-model.add(tf.keras.layers.Dense(6919 * 4 * 836))
-model.add(tf.keras.layers.Reshape((6919, 836, 4)))
+model.add(tf.keras.layers.Dense(num_items * num_output_features))
+model.add(tf.keras.layers.Reshape((num_items, num_output_features)))
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
-model.compile(optimizer=opt, loss="mean_squared_error")
-history = model.fit(train_input, train_output, epochs=20, batch_size=24)
+model.compile(
+    optimizer=opt,
+    # loss="mean_squared_error",
+    loss=mean_squared_proportional_error,
+    metrics=[mean_abs_proportional_error],
+)
+history = model.fit(
+    train_input,
+    train_output,
+    epochs=20,
+    batch_size=24,
+    validation_data=(test_input, test_output),
+)
 
 pass
