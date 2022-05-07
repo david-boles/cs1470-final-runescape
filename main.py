@@ -11,6 +11,7 @@ import tensorflow_addons as tfa
 from tensorflow.keras.models  import Sequential
 from tensorflow.keras.layers import LSTM, Dropout,Dense
 import tensorflow as tf
+
 def get_data(data_path, window_size=24, interp_limit=1, train_set_ratio=0.8):
     """
     interp_limit defines the maximum region that data is allowed
@@ -128,7 +129,8 @@ def get_data(data_path, window_size=24, interp_limit=1, train_set_ratio=0.8):
         ]
         arrays = [df.values for df in dfs]
         data_matrix = np.stack(arrays, axis=0)
-        # TODO, do we want this hard-coded? how does it relate to window size?
+        # 1<Bin_size<window_size, otherwise weird things happen
+        # Could set to something like floor(period_lengths/10) or something
         bin_size = 10
         temp_list_roc = []
         temp_list_roc_bin = []
@@ -137,11 +139,10 @@ def get_data(data_path, window_size=24, interp_limit=1, train_set_ratio=0.8):
         # temp_list_Ulcer = []
         temp_list_MI = []
         for item_ind in range(data_matrix.shape[2]):
-            # TODO do any of these leak information back in time?
             # Rate of change
             # First value is always Na because no change from first one
             feature_roc = ta.momentum.ROCIndicator(
-                close=pd.Series(data_matrix[0, :, item_ind]), window=1
+                close=pd.Series(data_matrix[0, :, item_ind]), window=1, fillna=True
             )
             generate_roc = feature_roc.roc()
             temp_list_roc.append(generate_roc)
@@ -150,14 +151,14 @@ def get_data(data_path, window_size=24, interp_limit=1, train_set_ratio=0.8):
             # Rate of change calculated over average value over bin_size time stamps
             # First bin_size values are Na # TODO problem?
             feature_roc_bin = ta.momentum.ROCIndicator(
-                close=pd.Series(data_matrix[0, :, item_ind]), window=bin_size
+                close=pd.Series(data_matrix[0, :, item_ind]), window=bin_size, fillna=True
             )
             generate_roc_bin = feature_roc_bin.roc()
             temp_list_roc_bin.append(generate_roc_bin)
 
             # Moving Average for bins
             feature_MA = ta.trend.SMAIndicator(
-                close=pd.Series(data_matrix[0, :, item_ind]), window=bin_size
+                close=pd.Series(data_matrix[0, :, item_ind]), window=bin_size, fillna=True
             )
             generate_MA = feature_MA.sma_indicator()
             temp_list_ma.append(generate_MA)
@@ -167,6 +168,7 @@ def get_data(data_path, window_size=24, interp_limit=1, train_set_ratio=0.8):
                 high=pd.Series(data_matrix[0, :, item_ind]),
                 low=pd.Series(data_matrix[1, :, item_ind]),
                 volume=pd.Series(data_matrix[2, :, item_ind]),
+                fillna=True
             )
             generate_EOM = feature_EOM.ease_of_movement()
             temp_list_EOM.append(generate_EOM)
@@ -279,8 +281,6 @@ def get_data(data_path, window_size=24, interp_limit=1, train_set_ratio=0.8):
 
     return train_input, train_output, test_input, test_output
 
-
-# TODO NaNs in engineered features
 
 train_input, train_output, test_input, test_output = get_data("./data", 10, 1)
 
