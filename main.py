@@ -31,7 +31,7 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
     # Cache folder is gitignored and file name is versioned and labeled
     # in an attempt to prevent stale caches (and because the picke is gibibytes in size :D ).
     # IF GET_DATA OR SOURCE PARQUET FILES ARE MODIFIED, BUMP THE VERSION NUMBER BELOW
-    cache_path = f"./data/cache/preprocessed-v1-{window_size}-{interp_limit}-{train_set_ratio}.pickle"
+    cache_path = f"./data/cache/preprocessed-v2-{window_size}-{interp_limit}-{train_set_ratio}.pickle"
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
 
     # Attempt to load cached pre-processed data first.
