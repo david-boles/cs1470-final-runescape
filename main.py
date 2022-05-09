@@ -31,7 +31,7 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
     # Cache folder is gitignored and file name is versioned and labeled
     # in an attempt to prevent stale caches (and because the picke is gibibytes in size :D ).
     # IF GET_DATA OR SOURCE PARQUET FILES ARE MODIFIED, BUMP THE VERSION NUMBER BELOW
-    cache_path = f"./data/cache/preprocessed-v3-{window_size}-{interp_limit}-{train_set_ratio}.pickle"
+    cache_path = f"./data/cache/preprocessed-v4-{window_size}-{interp_limit}-{train_set_ratio}.pickle"
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
 
     # Attempt to load cached pre-processed data first.
@@ -123,10 +123,29 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
 
     print("Finished 0 volume processing")
 
+    # Normalize price and volume data by dividing by the average
+    for period_dfs in [period_HAP_dfs, period_LAP_dfs, period_HAV_dfs, period_LAV_dfs]:
+        totals = pd.Series(0, index=item_index)
+        num_timesteps = 0
+        for period_df in period_dfs:
+            totals += period_df.sum(axis=0)
+            num_timesteps += period_df.shape[0]
+
+        averages = totals / num_timesteps
+        assert (averages != 0).all()
+
+        for i, period_df in enumerate(period_dfs):
+            # Workaround since apparently dividing dataframes inplace is impossible?
+            period_dfs[i] = period_df.divide(averages, axis=1)
+
+    print("Normalized data")
+
     # Compute delta of prices
     # NaNs are left in first row, but they won't be at the end of a window
     period_delta_HAP_dfs = [df.diff() for df in period_HAP_dfs]
     period_delta_LAP_dfs = [df.diff() for df in period_LAP_dfs]
+
+    print("Computed price deltas")
 
     # Feature engineeering
     # Added features - Rate of change, Binned Rate of change, Moving average,
@@ -311,14 +330,15 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
                     window_end_ind, :
                 ]
 
-    print("Done preprocessing data")
-
     data = (train_input, train_output, test_input, test_output)
 
     # Sanity check for remaining NaNs
     for d_arr in data:
         assert not np.any(np.isnan(d_arr))
 
+    print("Done preprocessing data")
+
+    # Cache the data so it doesn't have to be pre-processed again
     with open(cache_path, "wb") as f:
         pickle.dump(data, f, pickle.HIGHEST_PROTOCOL)
 
@@ -327,16 +347,12 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
     return data
 
 
-def mean_squared_proportional_error(y_true, y_pred):
-    # Both volume and prices are non-negative scalars
-    # We want a small error relative to whatever true price or
-    # volume the item actually has.
-    # Since the true values can be 0, we add 1 so it doesn't divide by 0.
-    return tf.reduce_mean(((y_true - y_pred) / (y_true + 1)) ** 2)
+def mean_abs_error(y_true, y_pred):
+    return tf.reduce_mean(tf.abs(y_true - y_pred))
 
 
-def mean_abs_proportional_error(y_true, y_pred):
-    return tf.reduce_mean(tf.abs((y_true - y_pred) / (y_true + 1)))
+def percent_of_signs_match(y_true, y_pred):
+    return tf.reduce_mean(tf.cast((y_true > 0) == (y_pred > 0), tf.float32))
 
 
 train_input, train_output, test_input, test_output = get_data()
@@ -381,9 +397,8 @@ model.add(tf.keras.layers.Reshape((num_items, num_output_features)))
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
 model.compile(
     optimizer=opt,
-    # loss="mean_squared_error",
-    loss=mean_squared_proportional_error,
-    metrics=[mean_abs_proportional_error],
+    loss="mean_squared_error",
+    metrics=[mean_abs_error, percent_of_signs_match],
 )
 history = model.fit(
     train_input,
