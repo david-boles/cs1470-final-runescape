@@ -293,11 +293,11 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
         period_LAP_dfs,
         period_HAV_dfs,
         period_LAV_dfs,
-        period_ROC_dfs,
-        period_ROC_bin_dfs,
-        period_MA_dfs,
-        period_EOM_dfs,
-        period_MI_dfs,
+        # period_ROC_dfs,
+        # period_ROC_bin_dfs,
+        # period_MA_dfs,
+        # period_EOM_dfs, # I think this one especially was problematic?
+        # period_MI_dfs,
     ]
 
     output_features = [
@@ -378,8 +378,8 @@ units = num_items * 10  # arbitrary :shrug:
 con = 0.3
 leaky = 0.75
 sr = 0.7
-dense1 = 200
-lr = 0.001
+# dense1 = 200
+lr = 0.0001
 
 
 model = Sequential()
@@ -388,7 +388,7 @@ model.add(
         units, connectivity=con, leaky=leaky, spectral_radius=sr, activation="tanh"
     )
 )  # , return_sequences = True ))
-model.add(tf.keras.layers.Dense(dense1, activation="relu"))
+# model.add(tf.keras.layers.Dense(dense1, activation="relu"))
 model.add(tf.keras.layers.Dense(num_items * 10))
 model.add(tf.keras.layers.Dense(num_items * 10))
 # model.add(Dropout(0.2))
@@ -403,8 +403,8 @@ model.compile(
 history = model.fit(
     train_input,
     train_output,
-    epochs=20,
-    batch_size=24,
+    epochs=1000,
+    batch_size=100,
     validation_data=(test_input, test_output),
 )
 
