@@ -31,7 +31,7 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
     # Cache folder is gitignored and file name is versioned and labeled
     # in an attempt to prevent stale caches (and because the picke is gibibytes in size :D ).
     # IF GET_DATA OR SOURCE PARQUET FILES ARE MODIFIED, BUMP THE VERSION NUMBER BELOW
-    cache_path = f"./data/cache/preprocessed-v4-{window_size}-{interp_limit}-{train_set_ratio}.pickle"
+    cache_path = f"./data/cache/preprocessed-v6-{window_size}-{interp_limit}-{train_set_ratio}.pickle"
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
 
     # Attempt to load cached pre-processed data first.
@@ -293,11 +293,11 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
         period_LAP_dfs,
         period_HAV_dfs,
         period_LAV_dfs,
-        period_ROC_dfs,
-        period_ROC_bin_dfs,
-        period_MA_dfs,
-        period_EOM_dfs,
-        period_MI_dfs,
+        # period_ROC_dfs,
+        # period_ROC_bin_dfs,
+        # period_MA_dfs,
+        # # period_EOM_dfs, # Results in enormous values
+        # period_MI_dfs,
     ]
 
     output_features = [
@@ -358,42 +358,43 @@ def percent_of_signs_match(y_true, y_pred):
 train_input, train_output, test_input, test_output = get_data()
 
 num_items = train_input.shape[2]
+num_input_features = train_input.shape[3]
 num_output_features = train_output.shape[2]
 
 
 # Optionally limit # items and, indirectly, network complexity for testing
-num_items = 100
-train_input = train_input[:, :, :num_items, :]
-train_output = train_output[:, :num_items, :]
-test_input = test_input[:, :, :num_items, :]
-test_output = test_output[:, :num_items, :]
+# num_items = 100
+# train_input = train_input[:, :, :num_items, :]
+# train_output = train_output[:, :num_items, :]
+# test_input = test_input[:, :, :num_items, :]
+# test_output = test_output[:, :num_items, :]
 
 print(num_items)
 
-train_input = train_input.reshape((*train_input.shape[:2], -1))
-test_input = test_input.reshape((*test_input.shape[:2], -1))
+
+# for arr in [train_input, train_output, test_input, test_output]:
+#     assert not np.isnan(arr).any()
+#     assert (arr >= 0).all()
+#     assert (arr < 1000).all()
+
+# train_input = train_input.reshape((*train_input.shape[:2], -1))
+# test_input = test_input.reshape((*test_input.shape[:2], -1))
 
 
-units = num_items * 10  # arbitrary :shrug:
-con = 0.3
-leaky = 0.75
-sr = 0.7
-dense1 = 200
-lr = 0.001
+lr = 0.0001
 
 
-model = Sequential()
-model.add(
-    tfa.layers.ESN(
-        units, connectivity=con, leaky=leaky, spectral_radius=sr, activation="tanh"
-    )
-)  # , return_sequences = True ))
-model.add(tf.keras.layers.Dense(dense1, activation="relu"))
-model.add(tf.keras.layers.Dense(num_items * 10))
-model.add(tf.keras.layers.Dense(num_items * 10))
-# model.add(Dropout(0.2))
-model.add(tf.keras.layers.Dense(num_items * num_output_features))
-model.add(tf.keras.layers.Reshape((num_items, num_output_features)))
+model = Sequential(
+    [
+        tf.keras.layers.Flatten(),
+        tf.keras.layers.Dense(num_items * num_input_features, activation="relu"),
+        tf.keras.layers.Dense(num_items, activation="relu"),
+        tf.keras.layers.Dropout(0.2),
+        tf.keras.layers.Dense(num_items, activation="relu"),
+        tf.keras.layers.Dense(num_items * num_output_features),
+        tf.keras.layers.Reshape((num_items, num_output_features)),
+    ]
+)
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
 model.compile(
     optimizer=opt,
@@ -403,8 +404,8 @@ model.compile(
 history = model.fit(
     train_input,
     train_output,
-    epochs=20,
-    batch_size=24,
+    epochs=1000,
+    batch_size=100,
     validation_data=(test_input, test_output),
 )
 
