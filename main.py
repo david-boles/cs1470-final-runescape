@@ -26,12 +26,12 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
     Where the input metrics are the following:
     High price, low price, high volume, low volume, ...engineered metrics.
     Outputs are ndarrays of shape num_examples x num_items x num_output_metrics.
-    Where the output metrics are the four non-engineered metrics.
+    Where the output metrics are delta high and low price.
     """
     # Cache folder is gitignored and file name is versioned and labeled
     # in an attempt to prevent stale caches (and because the picke is gibibytes in size :D ).
     # IF GET_DATA OR SOURCE PARQUET FILES ARE MODIFIED, BUMP THE VERSION NUMBER BELOW
-    cache_path = f"./data/cache/preprocessed-v1-{window_size}-{interp_limit}-{train_set_ratio}.pickle"
+    cache_path = f"./data/cache/preprocessed-v2-{window_size}-{interp_limit}-{train_set_ratio}.pickle"
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
 
     # Attempt to load cached pre-processed data first.
@@ -122,6 +122,11 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
     item_index = period_HAP_dfs[0].columns
 
     print("Finished 0 volume processing")
+
+    # Compute delta of prices
+    # NaNs are left in first row, but they won't be at the end of a window
+    period_delta_HAP_dfs = [df.diff() for df in period_HAP_dfs]
+    period_delta_LAP_dfs = [df.diff() for df in period_LAP_dfs]
 
     # Feature engineeering
     # Added features - Rate of change, Binned Rate of change, Moving average,
@@ -248,6 +253,8 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
     # Split each region into examples. Windows overlap (stride of 1) but test data is only
     # taken from the end of each period so that its output values have never
     # been trained on by the network.
+    # Output data is taken from the timestep after the window so windows do not include the
+    # last timestep.
     train_window_inds = []
     test_window_inds = []
     for item_ind, length in enumerate(period_lengths):
@@ -262,10 +269,31 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
         train_window_inds += window_inds[:start_test_windows]
         test_window_inds += window_inds[start_test_windows:]
 
-    train_input = np.zeros((len(train_window_inds), window_size, len(item_index), 9))
-    train_output = np.zeros((len(train_window_inds), len(item_index), 4))
-    test_input = np.zeros((len(test_window_inds), window_size, len(item_index), 9))
-    test_output = np.zeros((len(test_window_inds), len(item_index), 4))
+    input_features = [
+        period_HAP_dfs,
+        period_LAP_dfs,
+        period_HAV_dfs,
+        period_LAV_dfs,
+        period_ROC_dfs,
+        period_ROC_bin_dfs,
+        period_MA_dfs,
+        period_EOM_dfs,
+        period_MI_dfs,
+    ]
+
+    output_features = [
+        period_delta_HAP_dfs,
+        period_delta_LAP_dfs,
+    ]
+
+    input_shape = (window_size, len(item_index), len(input_features))
+    output_shape = (len(item_index), len(output_features))
+
+    train_input = np.zeros((len(train_window_inds), *input_shape))
+    train_output = np.zeros((len(train_window_inds), *output_shape))
+    test_input = np.zeros((len(test_window_inds), *input_shape))
+    test_output = np.zeros((len(test_window_inds), *output_shape))
+
     for window_inds, input, output in [
         [train_window_inds, train_input, train_output],
         [test_window_inds, test_input, test_output],
@@ -273,30 +301,23 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
         for example_ind, (period_ind, window_start_ind, window_end_ind) in enumerate(
             window_inds
         ):
-            for feature_ind, (feature_in_output, period_dfs) in enumerate(
-                [
-                    [True, period_HAP_dfs],
-                    [True, period_LAP_dfs],
-                    [True, period_HAV_dfs],
-                    [True, period_LAV_dfs],
-                    [False, period_ROC_dfs],
-                    [False, period_ROC_bin_dfs],
-                    [False, period_MA_dfs],
-                    [False, period_EOM_dfs],
-                    [False, period_MI_dfs],
-                ]
-            ):
+            for feature_ind, period_dfs in enumerate(input_features):
                 input[example_ind, :, :, feature_ind] = period_dfs[period_ind].iloc[
                     window_start_ind:window_end_ind, :
                 ]
-                if feature_in_output:
-                    output[example_ind, :, feature_ind] = period_dfs[period_ind].iloc[
-                        window_end_ind, :
-                    ]
+
+            for feature_ind, period_dfs in enumerate(output_features):
+                output[example_ind, :, feature_ind] = period_dfs[period_ind].iloc[
+                    window_end_ind, :
+                ]
 
     print("Done preprocessing data")
 
     data = (train_input, train_output, test_input, test_output)
+
+    # Sanity check for remaining NaNs
+    for d_arr in data:
+        assert not np.any(np.isnan(d_arr))
 
     with open(cache_path, "wb") as f:
         pickle.dump(data, f, pickle.HIGHEST_PROTOCOL)
