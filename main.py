@@ -347,6 +347,10 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
     return data
 
 
+def mean_sqrt_abs_error(y_true, y_pred):
+    return tf.reduce_mean(tf.sqrt(tf.abs(y_true - y_pred)))
+
+
 def percent_of_signs_match(y_true, y_pred):
     return tf.reduce_mean(tf.cast((y_true > 0) == (y_pred > 0), tf.float32))
 
@@ -366,7 +370,7 @@ num_output_features = train_output.shape[2]
 
 
 # Optionally limit # items and, indirectly, network complexity for testing
-num_items = 100
+num_items = 10
 train_input = train_input[:, :, :num_items, :]
 train_output = train_output[:, :num_items, :]
 test_input = test_input[:, :, :num_items, :]
@@ -381,10 +385,7 @@ evaluation_metrics = [
 metrics = [metric for (_, metric) in evaluation_metrics]
 
 
-def ESNModel():
-    # train_input = train_input.reshape((*train_input.shape[:2], -1))
-    # test_input = test_input.reshape((*test_input.shape[:2], -1))
-
+def ESNModel(loss):
     units = num_items * 10  # arbitrary :shrug:
     con = 0.3
     leaky = 0.75
@@ -399,21 +400,21 @@ def ESNModel():
             units, connectivity=con, leaky=leaky, spectral_radius=sr, activation="tanh"
         )
     )
-    model.add(tf.keras.layers.Dense(num_items * 10))
-    model.add(tf.keras.layers.Dense(num_items * 10))
+    model.add(tf.keras.layers.Dense(num_items * 10, activation="relu"))
+    model.add(tf.keras.layers.Dense(num_items * 10, activation="relu"))
     # model.add(Dropout(0.2))
     model.add(tf.keras.layers.Dense(num_items * num_output_features))
     model.add(tf.keras.layers.Reshape((num_items, num_output_features)))
     opt = tf.keras.optimizers.Adam(learning_rate=lr)
     model.compile(
         optimizer=opt,
-        loss="mean_squared_error",
+        loss=loss,
         metrics=metrics,
     )
     return model
 
 
-def FullyConnectedModel():
+def FullyConnectedModel(loss):
     lr = 0.0001
 
     model = Sequential(
@@ -430,33 +431,101 @@ def FullyConnectedModel():
     opt = tf.keras.optimizers.Adam(learning_rate=lr)
     model.compile(
         optimizer=opt,
-        loss="mean_squared_error",
+        loss=loss,
+        metrics=metrics,
+    )
+    return model
+
+
+def LSTMModel(loss):
+    lr = 0.0001
+
+    model = Sequential(
+        [
+            tf.keras.layers.Reshape((window_size, -1)),
+            tf.keras.layers.LSTM(num_items * num_output_features),
+            tf.keras.layers.Dense(num_items * num_output_features),
+            tf.keras.layers.Reshape((num_items, num_output_features)),
+        ]
+    )
+    opt = tf.keras.optimizers.Adam(learning_rate=lr)
+    model.compile(
+        optimizer=opt,
+        loss=loss,
         metrics=metrics,
     )
     return model
 
 
 models_to_test = [
-    ("Echo State Network", ESNModel),
-    ("Fully Connected Network", FullyConnectedModel),
+    # Mean Squared
+    (
+        "Echo State Network w/ Mean Squared",
+        ESNModel("mean_squared_error"),
+    ),
+    (
+        "Fully Connected Network w/ Mean Squared",
+        FullyConnectedModel("mean_squared_error"),
+    ),
+    (
+        "Long-Short Term Memory Network w/ Mean Squared",
+        LSTMModel("mean_squared_error"),
+    ),
+    # Mean Absolute
+    (
+        "Echo State Network w/ Mean Absolute",
+        ESNModel("mean_absolute_error"),
+    ),
+    (
+        "Fully Connected Network w/ Mean Absolute",
+        FullyConnectedModel("mean_absolute_error"),
+    ),
+    (
+        "Long-Short Term Memory Network w/ Mean Absolute",
+        LSTMModel("mean_absolute_error"),
+    ),
+    # Mean Square Root Absolute
+    (
+        "Echo State Network w/ Mean Sqrt Absolute",
+        ESNModel(mean_sqrt_abs_error),
+    ),
+    (
+        "Fully Connected Network w/ Mean Sqrt Absolute",
+        FullyConnectedModel(mean_sqrt_abs_error),
+    ),
+    (
+        "Long-Short Term Memory Network w/ Mean Sqrt Absolute",
+        LSTMModel(mean_sqrt_abs_error),
+    ),
 ]
 
+
 histories = []
-for _, model in models_to_test:
-    print(f"Training {model.__name__}")
+for name, model in models_to_test:
+    print(f"Training {name}")
     histories.append(
-        model()
-        .fit(
+        model.fit(
             train_input,
             train_output,
-            epochs=50,
+            epochs=10,
             batch_size=100,
             validation_data=(test_input, test_output),
-        )
-        .history
+        ).history
     )
 
-colors = ["b", "r", "g", "c", "m", "y", "k"]
+# colors = ["b", "r", "g", "c", "m", "y", "k"]
+colors = [
+    "tab:blue",
+    "tab:orange",
+    "tab:green",
+    "tab:red",
+    "tab:purple",
+    "tab:brown",
+    "tab:pink",
+    "tab:gray",
+    "tab:olive",
+    "tab:cyan",
+]
 
 for (metric_name, metric) in evaluation_metrics:
     metric_key = metric if isinstance(metric, str) else metric.__name__
@@ -471,7 +540,8 @@ for (metric_name, metric) in evaluation_metrics:
         for isval in [False, True]:
             plt.plot(
                 history[("val_" if isval else "") + metric_key],
-                colors[model_ind] + ("-" if isval else "*"),
+                ("-" if isval else "*"),
+                color=colors[model_ind],
             )
             set_name = "Validation" if isval else "Training"
             legend.append(f"{model_name} ({set_name} Set)")
