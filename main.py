@@ -293,11 +293,11 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
         period_LAP_dfs,
         period_HAV_dfs,
         period_LAV_dfs,
-        # period_ROC_dfs,
-        # period_ROC_bin_dfs,
-        # period_MA_dfs,
-        # # period_EOM_dfs, # Results in enormous values
-        # period_MI_dfs,
+        period_ROC_dfs,
+        period_ROC_bin_dfs,
+        period_MA_dfs,
+        # period_EOM_dfs,  # Results in enormous values
+        period_MI_dfs,
     ]
 
     output_features = [
@@ -363,11 +363,11 @@ num_output_features = train_output.shape[2]
 
 
 # Optionally limit # items and, indirectly, network complexity for testing
-# num_items = 100
-# train_input = train_input[:, :, :num_items, :]
-# train_output = train_output[:, :num_items, :]
-# test_input = test_input[:, :, :num_items, :]
-# test_output = test_output[:, :num_items, :]
+num_items = 100
+train_input = train_input[:, :, :num_items, :]
+train_output = train_output[:, :num_items, :]
+test_input = test_input[:, :, :num_items, :]
+test_output = test_output[:, :num_items, :]
 
 print(num_items)
 
