@@ -31,7 +31,7 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
     # Cache folder is gitignored and file name is versioned and labeled
     # in an attempt to prevent stale caches (and because the picke is gibibytes in size :D ).
     # IF GET_DATA OR SOURCE PARQUET FILES ARE MODIFIED, BUMP THE VERSION NUMBER BELOW
-    cache_path = f"./data/cache/preprocessed-v4-{window_size}-{interp_limit}-{train_set_ratio}.pickle"
+    cache_path = f"./data/cache/preprocessed-v11-{window_size}-{interp_limit}-{train_set_ratio}.pickle"
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
 
     # Attempt to load cached pre-processed data first.
@@ -347,17 +347,21 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
     return data
 
 
-def mean_abs_error(y_true, y_pred):
-    return tf.reduce_mean(tf.abs(y_true - y_pred))
-
-
 def percent_of_signs_match(y_true, y_pred):
     return tf.reduce_mean(tf.cast((y_true > 0) == (y_pred > 0), tf.float32))
 
 
+def count_trainable_weights(model):
+    return int(
+        np.sum([tf.keras.backend.count_params(p) for p in set(model.trainable_weights)])
+    )
+
+
 train_input, train_output, test_input, test_output = get_data()
 
+window_size = train_input.shape[1]
 num_items = train_input.shape[2]
+num_input_features = train_input.shape[3]
 num_output_features = train_output.shape[2]
 
 
@@ -367,45 +371,114 @@ train_input = train_input[:, :, :num_items, :]
 train_output = train_output[:, :num_items, :]
 test_input = test_input[:, :, :num_items, :]
 test_output = test_output[:, :num_items, :]
-
 print(num_items)
 
-train_input = train_input.reshape((*train_input.shape[:2], -1))
-test_input = test_input.reshape((*test_input.shape[:2], -1))
+evaluation_metrics = [
+    ("Mean Squared Error", "mean_squared_error"),
+    ("Mean Absolute Error", "mean_absolute_error"),
+    ("Percent Where Signs Match", percent_of_signs_match),
+]
+metrics = [metric for (_, metric) in evaluation_metrics]
 
 
-units = num_items * 10  # arbitrary :shrug:
-con = 0.3
-leaky = 0.75
-sr = 0.7
-# dense1 = 200
-lr = 0.0001
+def ESNModel():
+    # train_input = train_input.reshape((*train_input.shape[:2], -1))
+    # test_input = test_input.reshape((*test_input.shape[:2], -1))
 
+    units = num_items * 10  # arbitrary :shrug:
+    con = 0.3
+    leaky = 0.75
+    sr = 0.7
+    # dense1 = 200
+    lr = 0.0001
 
-model = Sequential()
-model.add(
-    tfa.layers.ESN(
-        units, connectivity=con, leaky=leaky, spectral_radius=sr, activation="tanh"
+    model = Sequential()
+    model.add(tf.keras.layers.Reshape((window_size, -1)))
+    model.add(
+        tfa.layers.ESN(
+            units, connectivity=con, leaky=leaky, spectral_radius=sr, activation="tanh"
+        )
     )
-)  # , return_sequences = True ))
-# model.add(tf.keras.layers.Dense(dense1, activation="relu"))
-model.add(tf.keras.layers.Dense(num_items * 10))
-model.add(tf.keras.layers.Dense(num_items * 10))
-# model.add(Dropout(0.2))
-model.add(tf.keras.layers.Dense(num_items * num_output_features))
-model.add(tf.keras.layers.Reshape((num_items, num_output_features)))
-opt = tf.keras.optimizers.Adam(learning_rate=lr)
-model.compile(
-    optimizer=opt,
-    loss="mean_squared_error",
-    metrics=[mean_abs_error, percent_of_signs_match],
-)
-history = model.fit(
-    train_input,
-    train_output,
-    epochs=1000,
-    batch_size=100,
-    validation_data=(test_input, test_output),
-)
+    model.add(tf.keras.layers.Dense(num_items * 10))
+    model.add(tf.keras.layers.Dense(num_items * 10))
+    # model.add(Dropout(0.2))
+    model.add(tf.keras.layers.Dense(num_items * num_output_features))
+    model.add(tf.keras.layers.Reshape((num_items, num_output_features)))
+    opt = tf.keras.optimizers.Adam(learning_rate=lr)
+    model.compile(
+        optimizer=opt,
+        loss="mean_squared_error",
+        metrics=metrics,
+    )
+    return model
+
+
+def FullyConnectedModel():
+    lr = 0.0001
+
+    model = Sequential(
+        [
+            tf.keras.layers.Flatten(),
+            tf.keras.layers.Dense(num_items * num_input_features, activation="relu"),
+            tf.keras.layers.Dense(num_items, activation="relu"),
+            tf.keras.layers.Dropout(0.2),
+            tf.keras.layers.Dense(num_items, activation="relu"),
+            tf.keras.layers.Dense(num_items * num_output_features),
+            tf.keras.layers.Reshape((num_items, num_output_features)),
+        ]
+    )
+    opt = tf.keras.optimizers.Adam(learning_rate=lr)
+    model.compile(
+        optimizer=opt,
+        loss="mean_squared_error",
+        metrics=metrics,
+    )
+    return model
+
+
+models_to_test = [
+    ("Echo State Network", ESNModel),
+    ("Fully Connected Network", FullyConnectedModel),
+]
+
+histories = []
+for _, model in models_to_test:
+    print(f"Training {model.__name__}")
+    histories.append(
+        model()
+        .fit(
+            train_input,
+            train_output,
+            epochs=50,
+            batch_size=100,
+            validation_data=(test_input, test_output),
+        )
+        .history
+    )
+
+colors = ["b", "r", "g", "c", "m", "y", "k"]
+
+for (metric_name, metric) in evaluation_metrics:
+    metric_key = metric if isinstance(metric, str) else metric.__name__
+
+    plt.figure()
+    plt.title(f"{metric_name} per Epoch by Model")
+
+    legend = []
+    for model_ind, ((model_name, _), history) in enumerate(
+        zip(models_to_test, histories)
+    ):
+        for isval in [False, True]:
+            plt.plot(
+                history[("val_" if isval else "") + metric_key],
+                colors[model_ind] + ("-" if isval else "*"),
+            )
+            set_name = "Validation" if isval else "Training"
+            legend.append(f"{model_name} ({set_name} Set)")
+
+    plt.legend(legend)
+
+plt.show()
+
 
 pass
