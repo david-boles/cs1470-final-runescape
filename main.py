@@ -13,6 +13,8 @@ from tensorflow.keras.layers import LSTM, Dropout, Dense
 import pickle
 import tensorflow as tf
 
+NUM_EPOCHS = 50
+
 
 def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
     """
@@ -378,8 +380,8 @@ test_output = test_output[:, :num_items, :]
 print(num_items)
 
 evaluation_metrics = [
-    ("Mean Squared Error", "mean_squared_error"),
-    ("Mean Absolute Error", "mean_absolute_error"),
+    ("Mean Squared Error", tf.keras.metrics.mean_squared_error),
+    ("Mean Absolute Error", tf.keras.metrics.mean_absolute_error),
     ("Percent Where Signs Match", percent_of_signs_match),
 ]
 metrics = [metric for (_, metric) in evaluation_metrics]
@@ -400,6 +402,9 @@ def ESNModel(loss):
             units, connectivity=con, leaky=leaky, spectral_radius=sr, activation="tanh"
         )
     )
+    model.add(tf.keras.layers.Dense(num_items * 10, activation="relu"))
+    model.add(tf.keras.layers.Dense(num_items * 10, activation="relu"))
+    model.add(tf.keras.layers.Dense(num_items * 10, activation="relu"))
     model.add(tf.keras.layers.Dense(num_items * 10, activation="relu"))
     model.add(tf.keras.layers.Dense(num_items * 10, activation="relu"))
     # model.add(Dropout(0.2))
@@ -507,7 +512,7 @@ for name, model in models_to_test:
         model.fit(
             train_input,
             train_output,
-            epochs=10,
+            epochs=NUM_EPOCHS,
             batch_size=100,
             validation_data=(test_input, test_output),
         ).history
@@ -527,6 +532,8 @@ colors = [
     "tab:cyan",
 ]
 
+baselines = [("Baseline: No Change", np.zeros(test_output.shape))]
+
 for (metric_name, metric) in evaluation_metrics:
     metric_key = metric if isinstance(metric, str) else metric.__name__
 
@@ -545,6 +552,16 @@ for (metric_name, metric) in evaluation_metrics:
             )
             set_name = "Validation" if isval else "Training"
             legend.append(f"{model_name} ({set_name} Set)")
+
+    for baseline_ind, (baseline_name, baseline_values) in enumerate(baselines):
+        color = colors[-1 - baseline_ind]
+        if not (metric == percent_of_signs_match and baseline_ind == 0):
+            result = float(tf.reduce_mean(metric(test_output, baseline_values)))
+            plt.plot([result] * NUM_EPOCHS, "-", color=color)
+            legend.append(baseline_name)
+        else:
+            plt.plot([0.5] * NUM_EPOCHS, "-", color=color)
+            legend.append("50/50 Probability")
 
     plt.legend(legend)
 
