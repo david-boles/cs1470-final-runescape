@@ -388,7 +388,7 @@ metrics = [metric for (_, metric) in evaluation_metrics]
 
 
 def ESNModel(loss):
-    units = 30 * num_items  # arbitrary :shrug:
+    units = 10 * num_items  # arbitrary :shrug:
     con = 0.5
     leaky = 0.5
     sr = 0.6
@@ -564,7 +564,8 @@ for (metric_name, metric) in evaluation_metrics:
 
     plt.legend(legend)
 
-plt.show()
+plt.show(block=False)
 
-
-pass
+# Halt without exiting for dropping into REPL
+while True:
+    pass
