@@ -294,13 +294,13 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
         test_window_inds += window_inds[start_test_windows:]
 
     input_features = [
-        period_HAP_dfs,
-        period_LAP_dfs,
-        period_HAV_dfs,
-        period_LAV_dfs,
+        # period_HAP_dfs,
+        # period_LAP_dfs,
+        # period_HAV_dfs,
+        # period_LAV_dfs,
         period_ROC_dfs,
-        period_ROC_bin_dfs,
-        period_MA_dfs,
+        # period_ROC_bin_dfs,
+        # period_MA_dfs,
         # period_EOM_dfs, # I think this one especially was problematic?
         period_MI_dfs,
         period_Volatility_dfs
@@ -519,6 +519,10 @@ models_to_test = [
         "Deep CNN Network w/ Mean Absolute",
         DeepCNNModel("mean_absolute_error"),
     ),
+    (
+        "LSTM Model w/ Mean Absolute",
+        LSTMModel("mean_absolute_error"),
+    )
     # Mean Square Root Absolute
     # (
     #     "Echo State Network w/ Mean Sqrt Absolute",
