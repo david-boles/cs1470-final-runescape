@@ -9,7 +9,7 @@ import numpy as np
 import ta
 import tensorflow_addons as tfa
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dropout, Dense
+from tensorflow.keras.layers import LSTM, Dropout, Dense, Conv1D, MaxPool1D, Flatten, LeakyReLU
 import pickle
 import tensorflow as tf
 
@@ -156,7 +156,7 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
     period_ROC_bin_dfs = []
     period_MA_dfs = []
     period_EOM_dfs = []
-    # period_Volatility_dfs = []
+    period_Volatility_dfs = []
     period_MI_dfs = []
 
     for per_ind in range(num_periods):
@@ -175,7 +175,7 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
         temp_list_roc_bin = []
         temp_list_ma = []
         temp_list_EOM = []
-        # temp_list_Ulcer = []
+        temp_list_Ulcer = []
         temp_list_MI = []
         for item_ind in range(data_matrix.shape[2]):
             # Rate of change
@@ -188,7 +188,6 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
 
             # Binned rate of change
             # Rate of change calculated over average value over bin_size time stamps
-            # First bin_size values are Na # TODO problem?
             feature_roc_bin = ta.momentum.ROCIndicator(
                 close=pd.Series(data_matrix[0, :, item_ind]),
                 window=bin_size,
@@ -218,9 +217,13 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
 
             # Ulcer index for volatility https://school.stockcharts.com/doku.php?id=technical_indicators:ulcer_index
             # Takes a while to compute, uncomment below to run (need to uncomment temp_list_ulcer, Folatility_df declaration too)
-            # feature_Volatility = ta.volatility.UlcerIndex(close = pd.Series(data_matrix[0,:,i]), window = bin_size)
-            # generate_Volatility = feature_Volatility.ulcer_index()
-            # temp_list_Ulcer.append(generate_Volatility)
+            feature_Volatility = ta.volatility.UlcerIndex(
+                close = pd.Series(data_matrix[0,:,i]), 
+                window = bin_size,
+                fillna=True
+            )
+            generate_Volatility = feature_Volatility.ulcer_index()
+            temp_list_Ulcer.append(generate_Volatility)
 
             # Mass index, also a volatility indicator tracks change in trend
             # https://www.investopedia.com/terms/m/mass-index.asp#:~:text=Mass%20index%20is%20a%20form,certain%20point%20and%20then%20contracts.
@@ -256,12 +259,12 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
                 columns=item_index,
             )
         )
-        # period_Volatility_dfs.append(
-        #     d.DataFrame(
-        #         np.vstack(temp_list_Ulcer).T,
-        #         columns=item_index,
-        #     )
-        # )
+        period_Volatility_dfs.append(
+            pd.DataFrame(
+                np.vstack(temp_list_Ulcer).T,
+                columns=item_index,
+            )
+        )
         period_MI_dfs.append(
             pd.DataFrame(
                 np.vstack(temp_list_MI).T,
@@ -291,15 +294,16 @@ def get_data(window_size=10, interp_limit=1, train_set_ratio=0.8):
         test_window_inds += window_inds[start_test_windows:]
 
     input_features = [
-        period_HAP_dfs,
-        period_LAP_dfs,
-        period_HAV_dfs,
-        period_LAV_dfs,
-        # period_ROC_dfs,
-        # period_ROC_bin_dfs,
-        # period_MA_dfs,
+        # period_HAP_dfs,
+        # period_LAP_dfs,
+        # period_HAV_dfs,
+        # period_LAV_dfs,
+        period_ROC_dfs,
+        period_ROC_bin_dfs,
+        period_MA_dfs,
         # period_EOM_dfs, # I think this one especially was problematic?
-        # period_MI_dfs,
+        period_MI_dfs,
+        period_Volatility_dfs
     ]
 
     output_features = [
@@ -462,6 +466,33 @@ def LSTMModel(loss):
     return model
 
 
+def DeepCNNModel(loss):
+    lr = 0.0001
+
+    model = Sequential(
+        [
+            tf.keras.layers.Reshape((window_size, -1)),
+            tf.keras.layers.Conv1D(num_items*num_output_features, kernel_size=2),
+            tf.keras.layers.Dropout(rate = 0.2),
+            tf.keras.layers.Conv1D(num_items*num_output_features, kernel_size=4),
+            tf.keras.layers.MaxPool1D(pool_size=2),
+            tf.keras.layers.Flatten(),
+            tf.keras.layers.Dense(num_items, activation="relu"),
+            tf.keras.layers.Dropout(0.2),
+            tf.keras.layers.Dense(num_items, activation="relu"),
+            tf.keras.layers.Dense(num_items * num_output_features),
+            tf.keras.layers.Reshape((num_items, num_output_features)),
+        ]
+    )
+    opt = tf.keras.optimizers.Adam(learning_rate=lr)
+    model.compile(
+        optimizer=opt,
+        loss=loss,
+        metrics=metrics,
+    )
+    return model
+
+
 models_to_test = [
     # Mean Squared
     (
@@ -476,6 +507,10 @@ models_to_test = [
         "Long-Short Term Memory Network w/ Mean Squared",
         LSTMModel("mean_squared_error"),
     ),
+    (
+        "Deep CNN Network w/ Mean Squared",
+        DeepCNNModel("mean_squared_error"),
+    ),
     # Mean Absolute
     (
         "Echo State Network w/ Mean Absolute",
@@ -486,8 +521,8 @@ models_to_test = [
         FullyConnectedModel("mean_absolute_error"),
     ),
     (
-        "Long-Short Term Memory Network w/ Mean Absolute",
-        LSTMModel("mean_absolute_error"),
+        "Deep CNN Network w/ Mean Absolute",
+        DeepCNNModel("mean_absolute_error"),
     ),
     # Mean Square Root Absolute
     (
@@ -501,6 +536,10 @@ models_to_test = [
     (
         "Long-Short Term Memory Network w/ Mean Sqrt Absolute",
         LSTMModel(mean_sqrt_abs_error),
+    ),
+    (
+        "Deep CNN Network w/ Mean sqrt Absolute",
+        DeepCNNModel(mean_sqrt_abs_error),
     ),
 ]
 
@@ -517,6 +556,14 @@ for name, model in models_to_test:
             validation_data=(test_input, test_output),
         ).history
     )
+
+# FullyConnectedModel(mean_sqrt_abs_error).fit(
+#     train_input,
+#     train_output,
+#     epochs=100,
+#     batch_size=100,
+#     validation_data=(test_input, test_output)
+# )
 
 # colors = ["b", "r", "g", "c", "m", "y", "k"]
 colors = [

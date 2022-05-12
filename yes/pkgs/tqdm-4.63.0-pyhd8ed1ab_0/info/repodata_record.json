@@ -1,0 +1,22 @@
+{
+    "arch": null,
+    "build": "pyhd8ed1ab_0",
+    "build_number": 0,
+    "channel": "conda-forge/noarch",
+    "depends": [
+        "colorama",
+        "python >=2.7"
+    ],
+    "fn": "tqdm-4.63.0-pyhd8ed1ab_0.tar.bz2",
+    "license": "MPL-2.0 or MIT",
+    "license_family": "MOZILLA",
+    "md5": "a3a5350ed455a52ddc644831dc294175",
+    "name": "tqdm",
+    "noarch": "python",
+    "platform": null,
+    "size": 82141,
+    "subdir": "noarch",
+    "timestamp": 1646031943047,
+    "url": "https://conda.anaconda.org/conda-forge/noarch/tqdm-4.63.0-pyhd8ed1ab_0.tar.bz2",
+    "version": "4.63.0"
+}
