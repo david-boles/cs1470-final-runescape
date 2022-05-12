@@ -504,19 +504,6 @@ models_to_test = [
 ]
 
 
-histories = []
-for name, model in models_to_test:
-    print(f"Training {name}")
-    histories.append(
-        model.fit(
-            train_input,
-            train_output,
-            epochs=NUM_EPOCHS,
-            batch_size=100,
-            validation_data=(test_input, test_output),
-        ).history
-    )
-
 # colors = ["b", "r", "g", "c", "m", "y", "k"]
 colors = [
     "tab:blue",
@@ -533,39 +520,85 @@ colors = [
 
 baselines = [("Baseline: No Change", np.zeros(test_output.shape))]
 
-for (metric_name, metric) in evaluation_metrics:
-    metric_key = metric if isinstance(metric, str) else metric.__name__
+if True:
+    histories = []
+    for name, model in models_to_test:
+        print(f"\n\nTraining {name}\n\n")
+        histories.append(
+            model.fit(
+                train_input,
+                train_output,
+                epochs=NUM_EPOCHS,
+                batch_size=100,
+                validation_data=(test_input, test_output),
+            ).history
+        )
 
-    plt.figure()
-    plt.title(f"{metric_name} per Epoch by Model")
+    for (metric_name, metric) in evaluation_metrics:
+        metric_key = metric if isinstance(metric, str) else metric.__name__
 
-    legend = []
-    for model_ind, ((model_name, _), history) in enumerate(
-        zip(models_to_test, histories)
-    ):
-        for isval in [False, True]:
-            plt.plot(
-                history[("val_" if isval else "") + metric_key],
-                ("-" if isval else "*"),
-                color=colors[model_ind],
-            )
-            set_name = "Validation" if isval else "Training"
-            legend.append(f"{model_name} ({set_name} Set)")
+        plt.figure()
+        plt.title(f"{metric_name} per Epoch by Model")
 
-    for baseline_ind, (baseline_name, baseline_values) in enumerate(baselines):
-        color = colors[-1 - baseline_ind]
-        if not (metric == percent_of_signs_match and baseline_ind == 0):
-            result = float(tf.reduce_mean(metric(test_output, baseline_values)))
-            plt.plot([result] * NUM_EPOCHS, "-", color=color)
-            legend.append(baseline_name)
-        else:
-            plt.plot([0.5] * NUM_EPOCHS, "-", color=color)
-            legend.append("50/50 Probability")
+        legend = []
+        for model_ind, ((model_name, _), history) in enumerate(
+            zip(models_to_test, histories)
+        ):
+            for isval in [False, True]:
+                plt.plot(
+                    history[("val_" if isval else "") + metric_key],
+                    ("-" if isval else "*"),
+                    color=colors[model_ind],
+                )
+                set_name = "Validation" if isval else "Training"
+                legend.append(f"{model_name} ({set_name} Set)")
 
-    plt.legend(legend)
+        for baseline_ind, (baseline_name, baseline_values) in enumerate(baselines):
+            color = colors[-1 - baseline_ind]
+            if not (metric == percent_of_signs_match and baseline_ind == 0):
+                result = float(tf.reduce_mean(metric(test_output, baseline_values)))
+                plt.plot([result] * NUM_EPOCHS, "-", color=color)
+                legend.append(baseline_name)
+            else:
+                plt.plot([0.5] * NUM_EPOCHS, "-", color=color)
+                legend.append("50/50 Probability")
 
+        plt.legend(legend)
+
+if False:
+    num_runs = 10
+
+    metric_data = [
+        np.zeros((num_runs, len(models_to_test)))
+        for _ in range(len(evaluation_metrics))
+    ]
+    for model_ind, (model_name, model) in enumerate(models_to_test):
+        for run_ind in range(num_runs):
+            print(f"\n\nTraining {model_name} {run_ind+1}/{num_runs}\n\n")
+            history = model.fit(
+                train_input,
+                train_output,
+                epochs=NUM_EPOCHS,
+                batch_size=100,
+                validation_data=(test_input, test_output),
+            ).history
+
+            for metric_ind, (metric_name, metric) in enumerate(evaluation_metrics):
+                metric_key = metric if isinstance(metric, str) else metric.__name__
+                metric_data[metric_ind][run_ind, model_ind] = history[
+                    "val_" + metric_key
+                ][-1]
+
+    for metric_ind, (metric_name, metric) in enumerate(evaluation_metrics):
+        plt.figure()
+        plt.title(f"{metric_name} by Model on Validation Set")
+        plt.boxplot(
+            metric_data[metric_ind],
+            labels=[model_name for model_name, _ in models_to_test],
+        )
+
+
+# Halt without exiting for dropping into REPL, while showing figures
 plt.show(block=False)
-
-# Halt without exiting for dropping into REPL
 while True:
-    pass
+    plt.pause(0.1)
