@@ -372,7 +372,7 @@ num_output_features = train_output.shape[2]
 
 
 # Optionally limit # items and, indirectly, network complexity for testing
-num_items = 10
+num_items = 100
 train_input = train_input[:, :, :num_items, :]
 train_output = train_output[:, :num_items, :]
 test_input = test_input[:, :, :num_items, :]
@@ -388,12 +388,10 @@ metrics = [metric for (_, metric) in evaluation_metrics]
 
 
 def ESNModel(loss):
-    units = num_items * 10  # arbitrary :shrug:
-    con = 0.3
-    leaky = 0.75
-    sr = 0.7
-    # dense1 = 200
-    lr = 0.0001
+    units = 30 * num_items  # arbitrary :shrug:
+    con = 0.5
+    leaky = 0.5
+    sr = 0.6
 
     model = Sequential()
     model.add(tf.keras.layers.Reshape((window_size, -1)))
@@ -406,11 +404,9 @@ def ESNModel(loss):
     model.add(tf.keras.layers.Dense(num_items * 10, activation="relu"))
     model.add(tf.keras.layers.Dense(num_items * 10, activation="relu"))
     model.add(tf.keras.layers.Dense(num_items * 10, activation="relu"))
-    model.add(tf.keras.layers.Dense(num_items * 10, activation="relu"))
-    # model.add(Dropout(0.2))
     model.add(tf.keras.layers.Dense(num_items * num_output_features))
     model.add(tf.keras.layers.Reshape((num_items, num_output_features)))
-    opt = tf.keras.optimizers.Adam(learning_rate=lr)
+    opt = tf.keras.optimizers.Adam(learning_rate=1e-4)
     model.compile(
         optimizer=opt,
         loss=loss,
@@ -420,20 +416,22 @@ def ESNModel(loss):
 
 
 def FullyConnectedModel(loss):
-    lr = 0.0001
+    lr = 1e-3
 
     model = Sequential(
         [
             tf.keras.layers.Flatten(),
             tf.keras.layers.Dense(num_items * num_input_features, activation="relu"),
-            tf.keras.layers.Dense(num_items, activation="relu"),
+            tf.keras.layers.Dense(num_items * num_input_features, activation="relu"),
+            tf.keras.layers.Dense(num_items * num_input_features, activation="relu"),
             tf.keras.layers.Dropout(0.2),
-            tf.keras.layers.Dense(num_items, activation="relu"),
+            tf.keras.layers.Dense(num_items * num_input_features, activation="relu"),
+            tf.keras.layers.Dense(num_items * num_input_features, activation="relu"),
             tf.keras.layers.Dense(num_items * num_output_features),
             tf.keras.layers.Reshape((num_items, num_output_features)),
         ]
     )
-    opt = tf.keras.optimizers.Adam(learning_rate=lr)
+    opt = tf.keras.optimizers.Adam(learning_rate=1e-3)
     model.compile(
         optimizer=opt,
         loss=loss,
@@ -443,17 +441,18 @@ def FullyConnectedModel(loss):
 
 
 def LSTMModel(loss):
-    lr = 0.0001
-
     model = Sequential(
         [
             tf.keras.layers.Reshape((window_size, -1)),
             tf.keras.layers.LSTM(num_items * num_output_features),
+            tf.keras.layers.Dense(num_items * num_output_features, activation="relu"),
+            tf.keras.layers.Dense(num_items * num_output_features, activation="relu"),
+            tf.keras.layers.Dense(num_items * num_output_features, activation="relu"),
             tf.keras.layers.Dense(num_items * num_output_features),
             tf.keras.layers.Reshape((num_items, num_output_features)),
         ]
     )
-    opt = tf.keras.optimizers.Adam(learning_rate=lr)
+    opt = tf.keras.optimizers.Adam(learning_rate=1e-4)
     model.compile(
         optimizer=opt,
         loss=loss,
@@ -464,18 +463,18 @@ def LSTMModel(loss):
 
 models_to_test = [
     # Mean Squared
-    (
-        "Echo State Network w/ Mean Squared",
-        ESNModel("mean_squared_error"),
-    ),
-    (
-        "Fully Connected Network w/ Mean Squared",
-        FullyConnectedModel("mean_squared_error"),
-    ),
-    (
-        "Long-Short Term Memory Network w/ Mean Squared",
-        LSTMModel("mean_squared_error"),
-    ),
+    # (
+    #     "Echo State Network w/ Mean Squared",
+    #     ESNModel("mean_squared_error"),
+    # ),
+    # (
+    #     "Fully Connected Network w/ Mean Squared",
+    #     FullyConnectedModel("mean_squared_error"),
+    # ),
+    # (
+    #     "Long-Short Term Memory Network w/ Mean Squared",
+    #     LSTMModel("mean_squared_error"),
+    # ),
     # Mean Absolute
     (
         "Echo State Network w/ Mean Absolute",
@@ -490,18 +489,18 @@ models_to_test = [
         LSTMModel("mean_absolute_error"),
     ),
     # Mean Square Root Absolute
-    (
-        "Echo State Network w/ Mean Sqrt Absolute",
-        ESNModel(mean_sqrt_abs_error),
-    ),
-    (
-        "Fully Connected Network w/ Mean Sqrt Absolute",
-        FullyConnectedModel(mean_sqrt_abs_error),
-    ),
-    (
-        "Long-Short Term Memory Network w/ Mean Sqrt Absolute",
-        LSTMModel(mean_sqrt_abs_error),
-    ),
+    # (
+    #     "Echo State Network w/ Mean Sqrt Absolute",
+    #     ESNModel(mean_sqrt_abs_error),
+    # ),
+    # (
+    #     "Fully Connected Network w/ Mean Sqrt Absolute",
+    #     FullyConnectedModel(mean_sqrt_abs_error),
+    # ),
+    # (
+    #     "Long-Short Term Memory Network w/ Mean Sqrt Absolute",
+    #     LSTMModel(mean_sqrt_abs_error),
+    # ),
 ]
 
 
