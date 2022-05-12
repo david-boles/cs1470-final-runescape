@@ -376,7 +376,7 @@ num_output_features = train_output.shape[2]
 
 
 # Optionally limit # items and, indirectly, network complexity for testing
-num_items = 10
+num_items = 100
 train_input = train_input[:, :, :num_items, :]
 train_output = train_output[:, :num_items, :]
 test_input = test_input[:, :, :num_items, :]
@@ -392,12 +392,10 @@ metrics = [metric for (_, metric) in evaluation_metrics]
 
 
 def ESNModel(loss):
-    units = num_items * 10  # arbitrary :shrug:
-    con = 0.3
-    leaky = 0.75
-    sr = 0.7
-    # dense1 = 200
-    lr = 0.0001
+    units = 10 * num_items  # arbitrary :shrug:
+    con = 0.5
+    leaky = 0.5
+    sr = 0.6
 
     model = Sequential()
     model.add(tf.keras.layers.Reshape((window_size, -1)))
@@ -410,11 +408,9 @@ def ESNModel(loss):
     model.add(tf.keras.layers.Dense(num_items * 10, activation="relu"))
     model.add(tf.keras.layers.Dense(num_items * 10, activation="relu"))
     model.add(tf.keras.layers.Dense(num_items * 10, activation="relu"))
-    model.add(tf.keras.layers.Dense(num_items * 10, activation="relu"))
-    # model.add(Dropout(0.2))
     model.add(tf.keras.layers.Dense(num_items * num_output_features))
     model.add(tf.keras.layers.Reshape((num_items, num_output_features)))
-    opt = tf.keras.optimizers.Adam(learning_rate=lr)
+    opt = tf.keras.optimizers.Adam(learning_rate=1e-4)
     model.compile(
         optimizer=opt,
         loss=loss,
@@ -424,20 +420,22 @@ def ESNModel(loss):
 
 
 def FullyConnectedModel(loss):
-    lr = 0.0001
+    lr = 1e-3
 
     model = Sequential(
         [
             tf.keras.layers.Flatten(),
             tf.keras.layers.Dense(num_items * num_input_features, activation="relu"),
-            tf.keras.layers.Dense(num_items, activation="relu"),
+            tf.keras.layers.Dense(num_items * num_input_features, activation="relu"),
+            tf.keras.layers.Dense(num_items * num_input_features, activation="relu"),
             tf.keras.layers.Dropout(0.2),
-            tf.keras.layers.Dense(num_items, activation="relu"),
+            tf.keras.layers.Dense(num_items * num_input_features, activation="relu"),
+            tf.keras.layers.Dense(num_items * num_input_features, activation="relu"),
             tf.keras.layers.Dense(num_items * num_output_features),
             tf.keras.layers.Reshape((num_items, num_output_features)),
         ]
     )
-    opt = tf.keras.optimizers.Adam(learning_rate=lr)
+    opt = tf.keras.optimizers.Adam(learning_rate=1e-3)
     model.compile(
         optimizer=opt,
         loss=loss,
@@ -447,17 +445,18 @@ def FullyConnectedModel(loss):
 
 
 def LSTMModel(loss):
-    lr = 0.0001
-
     model = Sequential(
         [
             tf.keras.layers.Reshape((window_size, -1)),
             tf.keras.layers.LSTM(num_items * num_output_features),
+            tf.keras.layers.Dense(num_items * num_output_features, activation="relu"),
+            tf.keras.layers.Dense(num_items * num_output_features, activation="relu"),
+            tf.keras.layers.Dense(num_items * num_output_features, activation="relu"),
             tf.keras.layers.Dense(num_items * num_output_features),
             tf.keras.layers.Reshape((num_items, num_output_features)),
         ]
     )
-    opt = tf.keras.optimizers.Adam(learning_rate=lr)
+    opt = tf.keras.optimizers.Adam(learning_rate=1e-4)
     model.compile(
         optimizer=opt,
         loss=loss,
@@ -495,22 +494,18 @@ def DeepCNNModel(loss):
 
 models_to_test = [
     # Mean Squared
-    (
-        "Echo State Network w/ Mean Squared",
-        ESNModel("mean_squared_error"),
-    ),
-    (
-        "Fully Connected Network w/ Mean Squared",
-        FullyConnectedModel("mean_squared_error"),
-    ),
-    (
-        "Long-Short Term Memory Network w/ Mean Squared",
-        LSTMModel("mean_squared_error"),
-    ),
-    (
-        "Deep CNN Network w/ Mean Squared",
-        DeepCNNModel("mean_squared_error"),
-    ),
+    # (
+    #     "Echo State Network w/ Mean Squared",
+    #     ESNModel("mean_squared_error"),
+    # ),
+    # (
+    #     "Fully Connected Network w/ Mean Squared",
+    #     FullyConnectedModel("mean_squared_error"),
+    # ),
+    # (
+    #     "Long-Short Term Memory Network w/ Mean Squared",
+    #     LSTMModel("mean_squared_error"),
+    # ),
     # Mean Absolute
     (
         "Echo State Network w/ Mean Absolute",
@@ -525,45 +520,20 @@ models_to_test = [
         DeepCNNModel("mean_absolute_error"),
     ),
     # Mean Square Root Absolute
-    (
-        "Echo State Network w/ Mean Sqrt Absolute",
-        ESNModel(mean_sqrt_abs_error),
-    ),
-    (
-        "Fully Connected Network w/ Mean Sqrt Absolute",
-        FullyConnectedModel(mean_sqrt_abs_error),
-    ),
-    (
-        "Long-Short Term Memory Network w/ Mean Sqrt Absolute",
-        LSTMModel(mean_sqrt_abs_error),
-    ),
-    (
-        "Deep CNN Network w/ Mean sqrt Absolute",
-        DeepCNNModel(mean_sqrt_abs_error),
-    ),
+    # (
+    #     "Echo State Network w/ Mean Sqrt Absolute",
+    #     ESNModel(mean_sqrt_abs_error),
+    # ),
+    # (
+    #     "Fully Connected Network w/ Mean Sqrt Absolute",
+    #     FullyConnectedModel(mean_sqrt_abs_error),
+    # ),
+    # (
+    #     "Long-Short Term Memory Network w/ Mean Sqrt Absolute",
+    #     LSTMModel(mean_sqrt_abs_error),
+    # ),
 ]
 
-
-histories = []
-for name, model in models_to_test:
-    print(f"Training {name}")
-    histories.append(
-        model.fit(
-            train_input,
-            train_output,
-            epochs=NUM_EPOCHS,
-            batch_size=100,
-            validation_data=(test_input, test_output),
-        ).history
-    )
-
-# FullyConnectedModel(mean_sqrt_abs_error).fit(
-#     train_input,
-#     train_output,
-#     epochs=100,
-#     batch_size=100,
-#     validation_data=(test_input, test_output)
-# )
 
 # colors = ["b", "r", "g", "c", "m", "y", "k"]
 colors = [
@@ -581,38 +551,85 @@ colors = [
 
 baselines = [("Baseline: No Change", np.zeros(test_output.shape))]
 
-for (metric_name, metric) in evaluation_metrics:
-    metric_key = metric if isinstance(metric, str) else metric.__name__
+if True:
+    histories = []
+    for name, model in models_to_test:
+        print(f"\n\nTraining {name}\n\n")
+        histories.append(
+            model.fit(
+                train_input,
+                train_output,
+                epochs=NUM_EPOCHS,
+                batch_size=100,
+                validation_data=(test_input, test_output),
+            ).history
+        )
 
-    plt.figure()
-    plt.title(f"{metric_name} per Epoch by Model")
+    for (metric_name, metric) in evaluation_metrics:
+        metric_key = metric if isinstance(metric, str) else metric.__name__
 
-    legend = []
-    for model_ind, ((model_name, _), history) in enumerate(
-        zip(models_to_test, histories)
-    ):
-        for isval in [False, True]:
-            plt.plot(
-                history[("val_" if isval else "") + metric_key],
-                ("-" if isval else "*"),
-                color=colors[model_ind],
-            )
-            set_name = "Validation" if isval else "Training"
-            legend.append(f"{model_name} ({set_name} Set)")
+        plt.figure()
+        plt.title(f"{metric_name} per Epoch by Model")
 
-    for baseline_ind, (baseline_name, baseline_values) in enumerate(baselines):
-        color = colors[-1 - baseline_ind]
-        if not (metric == percent_of_signs_match and baseline_ind == 0):
-            result = float(tf.reduce_mean(metric(test_output, baseline_values)))
-            plt.plot([result] * NUM_EPOCHS, "-", color=color)
-            legend.append(baseline_name)
-        else:
-            plt.plot([0.5] * NUM_EPOCHS, "-", color=color)
-            legend.append("50/50 Probability")
+        legend = []
+        for model_ind, ((model_name, _), history) in enumerate(
+            zip(models_to_test, histories)
+        ):
+            for isval in [False, True]:
+                plt.plot(
+                    history[("val_" if isval else "") + metric_key],
+                    ("-" if isval else "*"),
+                    color=colors[model_ind],
+                )
+                set_name = "Validation" if isval else "Training"
+                legend.append(f"{model_name} ({set_name} Set)")
 
-    plt.legend(legend)
+        for baseline_ind, (baseline_name, baseline_values) in enumerate(baselines):
+            color = colors[-1 - baseline_ind]
+            if not (metric == percent_of_signs_match and baseline_ind == 0):
+                result = float(tf.reduce_mean(metric(test_output, baseline_values)))
+                plt.plot([result] * NUM_EPOCHS, "-", color=color)
+                legend.append(baseline_name)
+            else:
+                plt.plot([0.5] * NUM_EPOCHS, "-", color=color)
+                legend.append("50/50 Probability")
 
-plt.show()
+        plt.legend(legend)
+
+if False:
+    num_runs = 10
+
+    metric_data = [
+        np.zeros((num_runs, len(models_to_test)))
+        for _ in range(len(evaluation_metrics))
+    ]
+    for model_ind, (model_name, model) in enumerate(models_to_test):
+        for run_ind in range(num_runs):
+            print(f"\n\nTraining {model_name} {run_ind+1}/{num_runs}\n\n")
+            history = model.fit(
+                train_input,
+                train_output,
+                epochs=NUM_EPOCHS,
+                batch_size=100,
+                validation_data=(test_input, test_output),
+            ).history
+
+            for metric_ind, (metric_name, metric) in enumerate(evaluation_metrics):
+                metric_key = metric if isinstance(metric, str) else metric.__name__
+                metric_data[metric_ind][run_ind, model_ind] = history[
+                    "val_" + metric_key
+                ][-1]
+
+    for metric_ind, (metric_name, metric) in enumerate(evaluation_metrics):
+        plt.figure()
+        plt.title(f"{metric_name} by Model on Validation Set")
+        plt.boxplot(
+            metric_data[metric_ind],
+            labels=[model_name for model_name, _ in models_to_test],
+        )
 
 
-pass
+# Halt without exiting for dropping into REPL, while showing figures
+plt.show(block=False)
+while True:
+    plt.pause(0.1)
